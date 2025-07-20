@@ -4,10 +4,11 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - develop
+      - convert-spring_boot
   pull_request:
     branches:
-      - main
+      - develop
 
 jobs:
   build:
@@ -16,7 +17,7 @@ jobs:
     steps:
       # 1) 코드 체크아웃
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 2) JDK 설치 및 Gradle 캐시 설정
       - name: Setup Java
@@ -33,7 +34,7 @@ jobs:
       # 4) (선택) 생성된 JAR을 아티팩트로 업로드
       - name: Upload build artifact
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: spring-boot-app
           path: build/libs/*.jar
