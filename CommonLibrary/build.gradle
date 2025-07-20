@@ -24,3 +24,7 @@ dependencies {
     api 'org.springframework.session:spring-session-data-redis'
     api 'org.springframework.boot:spring-boot-starter-data-redis'
 }
+
+tasks.named('jar') {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

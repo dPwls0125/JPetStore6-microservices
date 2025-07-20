@@ -1,0 +1,39 @@
+name: CI
+
+# 언제 실행할지 정의
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) 코드 체크아웃
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2) JDK 설치 및 Gradle 캐시 설정
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      # 3) 의존성 다운로드 & 빌드 실행
+      - name: Build & Test with Gradle
+        run: ./gradlew clean build
+
+      # 4) (선택) 생성된 JAR을 아티팩트로 업로드
+      - name: Upload build artifact
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: spring-boot-app
+          path: build/libs/*.jar
