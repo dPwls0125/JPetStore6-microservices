@@ -168,43 +168,43 @@ public class OrderService {
    *
    * @param order 생성할 주문
    */
+
+  // TODO : 그리고 멱등성에 대한 UUID 키는 프론트에서 주는것. ORDER_ID가 아니다.프론트에서 사용자가 동일한 주문을 여러번 요청하는치 판단하고, header로 UUID 키를 주는게 맞다.
+  // TODO : 로직이 너무 복잡하다. 리팩토링 필요
   @Transactional
   public void insertOrder(Order order, HttpSession session) throws OrderFailException, RetryUnknownException {
 
-      Optional<OrderRetryStatus> orderRetryStatus = orderRepository.findStatus(order.getOrderId());
+    Optional<OrderRetryStatus> orderRetryStatus = orderRepository.findStatus(order.getOrderId());
 
-      if (!orderRetryStatus.isPresent()){
-          orderRepository.insertStatus(new OrderRetryStatus(order.getOrderId(), UNPROCESSED));
-          orderRetryStatus = orderRepository.findStatus(order.getOrderId());
-      }
+    if (!orderRetryStatus.isPresent()) {
+      orderRepository.insertStatus(new OrderRetryStatus(order.getOrderId(), UNPROCESSED));
+      orderRetryStatus = orderRepository.findStatus(order.getOrderId());
+    }
 
-      if(orderRetryStatus.get().getStatus().equals(SUCCESS)){
-        return;
-      }
+    if (orderRetryStatus.get().getStatus().equals(SUCCESS)) {
+      return;
+    }
 
-      // Unknown 재요청 실패한 경우 -> 재요청 필요
-      if (orderRetryStatus.get().getStatus().equals(UNKNOWN)){
-        updateCommitSuccessCheck(order);
-      }
+    // Unknown 재요청 실패한 경우 -> 재요청 필요
+    if (orderRetryStatus.get().getStatus().equals(UNKNOWN)) {
+      updateCommitSuccessCheck(order);
+    }
 
     Map<String, Object> incrementPerItem = getIncrementAndItemsParam(order);
-    boolean resp = catalogGrpcClient.updateInventoryQuantity(incrementPerItem,order.getOrderId());
+    boolean resp = catalogGrpcClient.updateInventoryQuantity(incrementPerItem, order.getOrderId());
 
     // 즉시 재요청 : 5xx error, Time-out 발생한 경우 (비정상 실패)
     if (!resp) {
       updateCommitSuccessCheck(order);
     }
 
-    try{
-      orderRepository.insert(order);
-    }catch (Exception e){
-      kafkaTemplate.send("product_compensation",incrementPerItem);
+    try {
+      orderRepository.insert(
+          order); // TODO : commit이 됐으니까 보상을 하지 않겠다는건 말이 안됨. 어쨌든 error가 발생한 상황이고 다른 지점에 문제가 발생했을 수 있기 때문에 보상을 하지 않더라도 주문을 로직을 완료처리해서는 안됨
+    } catch (Exception e) {
+      kafkaTemplate.send("product_compensation", incrementPerItem);
+      orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), SUCCESS));
     }
-
-
-
-
-    orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), SUCCESS));
   }
 
   private static Map<String, Object> getIncrementAndItemsParam(Order order) {

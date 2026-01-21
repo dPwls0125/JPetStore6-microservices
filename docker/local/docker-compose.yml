@@ -7,9 +7,6 @@ services:
       - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-#    # Linux에서 host.docker.internal 사용을 위해:
-#    extra_hosts:
-#      - "host.docker.internal:host-gateway"
   redis:
     image: redis:alpine
     container_name: redis
@@ -17,12 +14,68 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-
   kafka:
     image: apache/kafka:4.0.0
     container_name: kafka
     ports:
       - "9092:9092"
+  kafdrop:
+    image: obsidiandynamics/kafdrop
+    container_name: kafdrop
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:9092"
+    depends_on:
+      - kafka
+
+  discoveryserver:
+    build:
+      context: ./../../DiscoveryServer
+    ports:
+      - "8761:8761"
+
+  gatewayservice:
+    build:
+      context: ./../../GatewayService
+    ports:
+      - "8080:8880"
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discoveryserver:8761/eureka
+    depends_on:
+      - discoveryserver
+
+  accountservice:
+    build:
+      context: ./../../AccountService
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discoveryserver:8761/eureka
+    depends_on:
+      - discoveryserver
+
+  cartservice:
+    build:
+      context: ./../../CartService
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discoveryserver:8761/eureka
+    depends_on:
+      - discoveryserver
+
+  catalogservice:
+    build:
+      context: ./../../CatalogService
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discoveryserver:8761/eureka
+    depends_on:
+      - discoveryserver
+
+  orderservice:
+    build:
+      context: ./../../OrderService
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discoveryserver:8761/eureka
+    depends_on:
+      - discoveryserver
 
 volumes:
   redis-data:
