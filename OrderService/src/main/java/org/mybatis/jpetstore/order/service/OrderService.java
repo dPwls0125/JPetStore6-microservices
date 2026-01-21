@@ -169,7 +169,7 @@ public class OrderService {
    * @param order 생성할 주문
    */
 
-  // TODO : 그리고 멱등성에 대한 UUID 키는 프론트에서 주는것. ORDER_ID가 아니다.프론트에서 사용자가 동일한 주문을 여러번 요청하는치 판단하고, header로 UUID 키를 주는게 맞다.
+  // TODO : 그리고 멱등성에 처리 방식에 대해서도 재고민해 볼 필요가 있을 것 같다.
   // TODO : 로직이 너무 복잡하다. 리팩토링 필요
   @Transactional
   public void insertOrder(Order order, HttpSession session) throws OrderFailException, RetryUnknownException {
