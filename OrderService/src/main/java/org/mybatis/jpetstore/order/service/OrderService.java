@@ -174,7 +174,7 @@ public class OrderService {
   @Transactional
   public void insertOrder(Order order, HttpSession session) throws OrderFailException, RetryUnknownException {
 
-    Optional<OrderRetryStatus> orderRetryStatus = orderRepository.findStatus(order.getOrderId());
+    Optional<OrderRetryStatus> orderRetryStatus = orderRepository.findStatus(order.getOrderId()); // 재요청 상태 조회를 orderID로 하면 안된다고 생각한다. -> 프론트에서 주는 UUID 키로 해야함
 
     if (!orderRetryStatus.isPresent()) {
       orderRepository.insertStatus(new OrderRetryStatus(order.getOrderId(), UNPROCESSED));
@@ -188,9 +188,9 @@ public class OrderService {
     // Unknown 재요청 실패한 경우 -> 재요청 필요
     if (orderRetryStatus.get().getStatus().equals(UNKNOWN)) {
       updateCommitSuccessCheck(order);
-    }
+    } // TODO : 분기가 너무 많다.
 
-    Map<String, Object> incrementPerItem = getIncrementAndItemsParam(order);
+    Map<String, Object> incrementPerItem = getIncrementAndItemsParam(order); // TODO : item에 대한 재고와 수량만 넘기면 되는것이 맞는지 재고민
     boolean resp = catalogGrpcClient.updateInventoryQuantity(incrementPerItem, order.getOrderId());
 
     // 즉시 재요청 : 5xx error, Time-out 발생한 경우 (비정상 실패)
