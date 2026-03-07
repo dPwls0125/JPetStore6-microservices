@@ -17,6 +17,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -40,8 +41,8 @@ class OrderServiceTest {
     private OrderService orderService;
 
     @Test
-    @DisplayName("주문 저장 실패 시 Kafka 보상 메시지가 발행되는지 확인")
-    void shouldSendKafkaMessageWhenOrderInsertFails() throws OrderFailException, RetryUnknownException {
+    @DisplayName("주문 저장 실패 시 Kafka 보상 메시지를 발행하고 실패 처리한다")
+    void shouldCompensateAndFailWhenOrderInsertFails() throws RetryUnknownException {
         // 1. 테스트 데이터 준비
         Order order = new Order();
         order.setOrderId(1001);
@@ -49,8 +50,7 @@ class OrderServiceTest {
 
         // 2. Mock 설정
         when(orderRepository.findStatus(anyInt()))
-            .thenReturn(Optional.empty())
-            .thenReturn(Optional.of(new OrderRetryStatus(1001, "unprocessed")));
+            .thenReturn(Optional.empty());
         
         when(catalogGrpcClient.updateInventoryQuantity(any(), anyInt())).thenReturn(true);
 
@@ -58,12 +58,30 @@ class OrderServiceTest {
         doThrow(new RuntimeException("DB Insert Error")).when(orderRepository).insert(any(Order.class));
 
         // 3. 테스트 실행
-        orderService.insertOrder(order, session);
+        assertThrows(OrderFailException.class, () -> orderService.insertOrder(order, session));
 
         // 4. 검증: kafkaTemplate.send가 "product_compensation" 토픽으로 호출되었는지 확인
         verify(kafkaTemplate, times(1)).send(eq("product_compensation"), any());
         
-        // 추가 검증: 상태가 success로 업데이트 되었는지 확인
-        verify(orderRepository, times(1)).updateStatus(argThat(status -> status.getStatus().equals("success")));
+        // 추가 검증: 상태가 fail로 업데이트 되었는지 확인
+        verify(orderRepository, times(1)).updateStatus(argThat(status -> status.getStatus().equals("fail")));
     }
+
+    @Test
+    @DisplayName("inventory commit 성공 확인 시에도 보상 트랜잭션을 발행하고 실패 처리한다")
+    void shouldCompensateAndFailWhenCommitSuccessIsConfirmed() throws RetryUnknownException {
+        Order order = new Order();
+        order.setOrderId(2002);
+        order.setLineItems(new java.util.ArrayList<>());
+
+        when(orderRepository.findStatus(anyInt())).thenReturn(Optional.of(new OrderRetryStatus(2002, "unknown")));
+        when(catalogGrpcClient.isInventoryUpdateCommitSuccess(2002)).thenReturn(true);
+
+        assertThrows(OrderFailException.class, () -> orderService.insertOrder(order, session));
+
+        verify(kafkaTemplate, times(1)).send(eq("product_compensation"), any());
+        verify(orderRepository, times(1)).updateStatus(argThat(status -> status.getStatus().equals("fail")));
+        verify(orderRepository, never()).insert(any(Order.class));
+    }
+
 }

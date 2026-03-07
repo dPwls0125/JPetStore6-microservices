@@ -63,6 +63,7 @@ public class OrderService {
   private static final String FAIL = "fail";
   // 첫 주문 등의 이유로 지난 주문에 대한 내역이 없는 상태
   private static final String UNPROCESSED = "unprocessed";
+  private static final String COMPENSATION_TOPIC = "product_compensation";
 
 
   /**
@@ -170,41 +171,18 @@ public class OrderService {
    */
 
   // TODO : 그리고 멱등성에 처리 방식에 대해서도 재고민해 볼 필요가 있을 것 같다.
-  // TODO : 로직이 너무 복잡하다. 리팩토링 필요
   @Transactional
   public void insertOrder(Order order, HttpSession session) throws OrderFailException, RetryUnknownException {
-
-    Optional<OrderRetryStatus> orderRetryStatus = orderRepository.findStatus(order.getOrderId()); // 재요청 상태 조회를 orderID로 하면 안된다고 생각한다. -> 프론트에서 주는 UUID 키로 해야함
-
-    if (!orderRetryStatus.isPresent()) {
-      orderRepository.insertStatus(new OrderRetryStatus(order.getOrderId(), UNPROCESSED));
-      orderRetryStatus = orderRepository.findStatus(order.getOrderId());
-    }
-
-    if (orderRetryStatus.get().getStatus().equals(SUCCESS)) {
+    OrderRetryStatus retryStatus = getOrCreateRetryStatus(order.getOrderId());
+    if (isOrderAlreadySucceeded(retryStatus)) {
       return;
     }
 
-    // Unknown 재요청 실패한 경우 -> 재요청 필요
-    if (orderRetryStatus.get().getStatus().equals(UNKNOWN)) {
-      updateCommitSuccessCheck(order);
-    } // TODO : 분기가 너무 많다.
+    ensureUnknownStateIsRecoverable(retryStatus, order);
 
-    Map<String, Object> incrementPerItem = getIncrementAndItemsParam(order); // TODO : item에 대한 재고와 수량만 넘기면 되는것이 맞는지 재고민
-    boolean resp = catalogGrpcClient.updateInventoryQuantity(incrementPerItem, order.getOrderId());
-
-    // 즉시 재요청 : 5xx error, Time-out 발생한 경우 (비정상 실패)
-    if (!resp) {
-      updateCommitSuccessCheck(order);
-    }
-
-    try {
-      orderRepository.insert(
-          order); // TODO : commit이 됐으니까 보상을 하지 않겠다는건 말이 안됨. 어쨌든 error가 발생한 상황이고 다른 지점에 문제가 발생했을 수 있기 때문에 보상을 하지 않더라도 주문을 로직을 완료처리해서는 안됨
-    } catch (Exception e) {
-      kafkaTemplate.send("product_compensation", incrementPerItem);
-      orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), SUCCESS));
-    }
+    Map<String, Object> incrementPerItem = getIncrementAndItemsParam(order);
+    updateInventoryOrThrow(order, incrementPerItem);
+    persistOrderOrCompensate(order, incrementPerItem);
   }
 
   private static Map<String, Object> getIncrementAndItemsParam(Order order) {
@@ -226,12 +204,15 @@ public class OrderService {
       // 즉시 재요청 - 수량 변경 commit 성공 여부 확인
       boolean isCommitSuccess = catalogGrpcClient.isInventoryUpdateCommitSuccess(sessionOrder.getOrderId());
 
-      if (!isCommitSuccess) {
-        // fail : Known_case2 : commit 실패한 경우 -> 실패 처리
-        log.info("Known_case2_commitFail");
-        orderRepository.updateStatus(new OrderRetryStatus(sessionOrder.getOrderId(), FAIL));
-        throw new OrderFailException("주문 실패");
+      // commit 성공 여부와 무관하게 현재 주문은 실패 처리하고 보상 트랜잭션 발행
+      if (isCommitSuccess) {
+        log.info("Known_case1_commitSuccess_compensationNeeded");
+        publishCompensation(sessionOrder);
       }
+
+      log.info("Known_case2_commitFail");
+      orderRepository.updateStatus(new OrderRetryStatus(sessionOrder.getOrderId(), FAIL));
+      throw new OrderFailException("주문 실패");
 
     } catch(HttpServerErrorException serverError){
         // Unknown : 즉시 재요청에 server Error 발생, 트랜잭션 커밋 성공 여부를 알 수 없는 경우
@@ -245,7 +226,53 @@ public class OrderService {
         orderRepository.updateStatus(new OrderRetryStatus(sessionOrder.getOrderId(), UNKNOWN));
         throw new RetryUnknownException("리소스 접근 예외 발생 - time out");
       }
-    log.info("문제 없음");
+  }
+
+  private OrderRetryStatus getOrCreateRetryStatus(int orderId) {
+    return orderRepository.findStatus(orderId)
+        .orElseGet(() -> {
+          orderRepository.insertStatus(new OrderRetryStatus(orderId, UNPROCESSED));
+          return new OrderRetryStatus(orderId, UNPROCESSED);
+        });
+  }
+
+  private boolean isOrderAlreadySucceeded(OrderRetryStatus retryStatus) {
+    return SUCCESS.equals(retryStatus.getStatus());
+  }
+
+  private void ensureUnknownStateIsRecoverable(OrderRetryStatus retryStatus, Order order)
+      throws OrderFailException, RetryUnknownException {
+    if (UNKNOWN.equals(retryStatus.getStatus())) {
+      updateCommitSuccessCheck(order);
+    }
+  }
+
+  private void updateInventoryOrThrow(Order order, Map<String, Object> incrementPerItem)
+      throws OrderFailException, RetryUnknownException {
+    boolean inventoryUpdated = catalogGrpcClient.updateInventoryQuantity(incrementPerItem, order.getOrderId());
+    if (!inventoryUpdated) {
+      updateCommitSuccessCheck(order);
+    }
+  }
+
+
+  private void publishCompensation(Order order) {
+    Map<String, Object> incrementPerItem = getIncrementAndItemsParam(order);
+    kafkaTemplate.send(COMPENSATION_TOPIC, incrementPerItem);
+  }
+
+  private void persistOrderOrCompensate(Order order, Map<String, Object> incrementPerItem)
+      throws OrderFailException {
+    try {
+      orderRepository.insert(order);
+      orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), SUCCESS));
+    } catch (Exception e) {
+      log.error("Order persistence failed. Publishing compensation transaction. orderId={}",
+          order.getOrderId(), e);
+      kafkaTemplate.send(COMPENSATION_TOPIC, incrementPerItem);
+      orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), FAIL));
+      throw new OrderFailException("주문 저장 실패로 보상 트랜잭션이 발행되었습니다.");
+    }
   }
 
   /**
