@@ -51,3 +51,8 @@ eureka:
   instance:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${server.port}
+order:
+  chaos:
+    force-persist-failure: ${ORDER_CHAOS_FORCE_PERSIST_FAILURE:false}
+    skip-compensation-on-persist-failure: ${ORDER_CHAOS_SKIP_COMPENSATION_ON_PERSIST_FAILURE:false}
+    check-inventory-inconsistency-on-failure: ${ORDER_CHAOS_CHECK_INVENTORY_INCONSISTENCY_ON_FAILURE:true}

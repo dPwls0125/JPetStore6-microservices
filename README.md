@@ -21,3 +21,18 @@
 - [ ] 서비스 간의 세션 공유가 적절한가? 단일 장애 지점이 되지는 않는가?
 - [ ] 다른 서비스의 로직을 참고하는 상황에서 N+1 문제가 발생하지는 않는가? API 통신이기 때문에 호출량이 많아지면 엄청난 지연이 발생 가능하다.
 - [ ] 현재와 같이 SSR일 경우에 다른 서비스의 데이터들을 조합까지 한 후 뷰를 반환하게 되면 응답 속도가 SPA에 비해 느려지지 않는가? 그렇다면 뷰를 분리할 것인가?
+
+
+## Kafka 보상 트랜잭션 Chaos 테스트 (OrderService)
+- `ORDER_CHAOS_FORCE_PERSIST_FAILURE=true` : 재고 차감 이후 Order 저장 단계에서 의도적으로 실패를 발생시킨다.
+- `ORDER_CHAOS_SKIP_COMPENSATION_ON_PERSIST_FAILURE=true` : 저장 실패 시 Kafka 보상 메시지 발행을 생략한다(재고 불일치 재현용).
+- `ORDER_CHAOS_CHECK_INVENTORY_INCONSISTENCY_ON_FAILURE=true` : 실패 시 `isInventoryUpdateCommitSuccess`를 재조회하여 불일치 여부를 로그로 남긴다.
+
+예시:
+```bash
+ORDER_CHAOS_FORCE_PERSIST_FAILURE=true \
+ORDER_CHAOS_SKIP_COMPENSATION_ON_PERSIST_FAILURE=false \
+./gradlew :OrderService:bootRun
+```
+
+보상 비활성화 시에는 OrderService 로그에 `INVENTORY_INCONSISTENCY_DETECTED`가 출력되는지 확인한다.

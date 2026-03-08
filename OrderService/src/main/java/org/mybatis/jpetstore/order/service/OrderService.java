@@ -31,6 +31,7 @@ import org.mybatis.jpetstore.common.grpc.CatalogGrpcClient;
 import org.mybatis.jpetstore.order.repository.LineItemRepository;
 import org.mybatis.jpetstore.order.repository.OrderRepository;
 import org.mybatis.jpetstore.order.repository.SequenceRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,6 +65,15 @@ public class OrderService {
   // 첫 주문 등의 이유로 지난 주문에 대한 내역이 없는 상태
   private static final String UNPROCESSED = "unprocessed";
   private static final String COMPENSATION_TOPIC = "product_compensation";
+
+  @Value("${order.chaos.force-persist-failure:false}")
+  private boolean forcePersistFailure;
+
+  @Value("${order.chaos.skip-compensation-on-persist-failure:false}")
+  private boolean skipCompensationOnPersistFailure;
+
+  @Value("${order.chaos.check-inventory-inconsistency-on-failure:true}")
+  private boolean checkInventoryInconsistencyOnFailure;
 
 
   /**
@@ -264,14 +274,43 @@ public class OrderService {
   private void persistOrderOrCompensate(Order order, Map<String, Object> incrementPerItem)
       throws OrderFailException {
     try {
+      if (forcePersistFailure) {
+        throw new IllegalStateException("Chaos mode: forced order persistence failure");
+      }
       orderRepository.insert(order);
       orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), SUCCESS));
     } catch (Exception e) {
-      log.error("Order persistence failed. Publishing compensation transaction. orderId={}",
+      log.error("Order persistence failed. orderId={}",
           order.getOrderId(), e);
-      kafkaTemplate.send(COMPENSATION_TOPIC, incrementPerItem);
+
+      if (skipCompensationOnPersistFailure) {
+        log.error("Chaos mode: skipping compensation transaction on failure. orderId={}",
+            order.getOrderId());
+      } else {
+        kafkaTemplate.send(COMPENSATION_TOPIC, incrementPerItem);
+      }
+
+      logPotentialInventoryInconsistency(order.getOrderId());
       orderRepository.updateStatus(new OrderRetryStatus(order.getOrderId(), FAIL));
-      throw new OrderFailException("주문 저장 실패로 보상 트랜잭션이 발행되었습니다.");
+      throw new OrderFailException("주문 저장에 실패했습니다.");
+    }
+  }
+
+  private void logPotentialInventoryInconsistency(int orderId) {
+    if (!checkInventoryInconsistencyOnFailure) {
+      return;
+    }
+
+    try {
+      boolean inventoryCommitSucceeded = catalogGrpcClient.isInventoryUpdateCommitSuccess(orderId);
+      if (inventoryCommitSucceeded) {
+        log.error("INVENTORY_INCONSISTENCY_DETECTED - inventory was already committed but order failed. orderId={}",
+            orderId);
+      } else {
+        log.info("Inventory update was not committed, no inconsistency detected. orderId={}", orderId);
+      }
+    } catch (Exception exception) {
+      log.warn("Failed to verify potential inventory inconsistency. orderId={}", orderId, exception);
     }
   }
 
