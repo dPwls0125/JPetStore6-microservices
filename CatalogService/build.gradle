@@ -8,6 +8,6 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
     implementation 'org.springframework.kafka:spring-kafka:3.3.7'
     implementation 'net.devh:grpc-server-spring-boot-starter:3.1.0.RELEASE'
-    testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test:3.3.7'
 }
 

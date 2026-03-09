@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.mybatis.jpetstore.catalog.controller.CatalogController;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
@@ -23,7 +23,7 @@ class CatalogControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
-    @MockitoBean
+    @MockBean
     private CatalogService catalogService;
 
     // 메인 페이지 요청 시 정상적으로 뷰를 반환한다

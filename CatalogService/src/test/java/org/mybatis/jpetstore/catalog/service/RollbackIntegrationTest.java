@@ -19,7 +19,7 @@ import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -36,6 +36,7 @@ import static org.mockito.Mockito.verify;
 @SpringBootTest(classes = CatalogServiceApplication.class, properties = {
     "eureka.client.enabled=false",
     "spring.cloud.discovery.enabled=false",
+    "spring.cloud.compatibility-verifier.enabled=false",
     "spring.sql.init.mode=always",
     "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,org.mybatis.jpetstore.common.config.CommonAutoConfiguration",
     "spring.kafka.consumer.value-deserializer=org.springframework.kafka.support.serializer.JsonDeserializer",
@@ -51,7 +52,7 @@ public class RollbackIntegrationTest {
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;
 
-    @MockitoSpyBean
+    @SpyBean
     private CatalogService catalogService;
 
     @Autowired
