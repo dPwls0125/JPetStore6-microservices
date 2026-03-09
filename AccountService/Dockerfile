@@ -1,10 +1,4 @@
-FROM gradle:8.4-jdk21 AS build
-WORKDIR /workspace
-COPY . .
-RUN ./gradlew :AccountService:bootWar -x test --no-daemon
-
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-COPY --from=build /workspace/AccountService/build/libs/*.war app.war
-EXPOSE 8081
-ENTRYPOINT ["java","-jar","app.war"]
+FROM eclipse-temurin:21-jdk
+ARG WAR_FILE=build/libs/*.war
+COPY ${WAR_FILE} app.war
+ENTRYPOINT ["java","-jar","/app.war"]
